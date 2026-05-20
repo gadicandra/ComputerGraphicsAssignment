@@ -1,0 +1,32 @@
+# Build artifacts
+build/
+.cache/
+
+# Vendored archive (sumber GLAD sudah di-extract ke glad/)
+glad.zip
+
+# Asset binaries (hanya .glb/.obj/.mtl yang di-track)
+models/**/*.zip
+models/**/*.jpg
+models/**/*.jpeg
+models/**/*.png
+
+# IDE & editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Compiled object & shared lib (catatan: *.obj sengaja tidak di-ignore
+# karena bentrok dengan 3D model .obj. C object files Windows ada di build/ saja)
+*.o
+*.a
+*.so
+*.exe
+
+# CMake user files
+compile_commands.json
+CMakeCache.txt
+CMakeFiles/
