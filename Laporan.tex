@@ -1,0 +1,355 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[bahasa]{babel}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{url}
+\usepackage{hyperref}
+
+\geometry{a4paper, margin=2.5cm}
+
+% Konfigurasi nomor halaman kanan bawah saja
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[R]{\thepage}
+
+\renewcommand{\thesubsection}{\Alph{subsection}}
+
+% Konfigurasi listing untuk kode CLIPS
+\lstdefinelanguage{CLIPS}{
+    keywords={deftemplate, deffacts, defrule, deffunction, slot, declare, salience},
+    keywordstyle=\bfseries,
+    morecomment=[l]{;},
+    commentstyle=\itshape,
+    morestring=[b]",
+    stringstyle=\ttfamily,
+    sensitive=true
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    language=CLIPS,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    keywordstyle=\bfseries,
+    commentstyle=\itshape,
+    stringstyle=\ttfamily,
+    showstringspaces=false,
+    tabsize=2,
+    xleftmargin=1em,
+    framexleftmargin=1em
+}
+
+\def\UrlBreaks{\do\/\do-\do_}
+
+\begin{document}
+
+% ============================================================
+% HALAMAN JUDUL
+% ============================================================
+\begin{titlepage}
+    \centering
+
+    {\LARGE\textbf{LAPORAN TUGAS TEKNIK}}\\
+    \vspace{0.3cm}
+    {\LARGE\textbf{PEMODELAN DAN SIMULASI}}\\
+    \vspace{1cm}
+
+    {\Large\textbf{Simulasi Persamaan Differensial Lotka-Volterra}}\\
+
+    \vspace{2cm}
+
+    \includegraphics[width=0.5\textwidth]{logo_ugm.png}
+
+    \vspace{2cm}
+
+    {\large
+    \textbf{Garjita Adicandra}\\
+    NIM: 24/535330/TK/59377\\
+    }
+
+    \vfill
+
+    {\large
+    Departemen Teknik Elektro dan Teknologi Informasi\\
+    Fakultas Teknik\\
+    Universitas Gadjah Mada\\
+    2025
+    }
+\end{titlepage}
+
+\newpage
+\tableofcontents
+\newpage
+
+\subsection{Import Library}
+Bagian ini memuat pustaka yang dibutuhkan untuk perhitungan matriks, visualisasi, dan penyelesaian persamaan diferensial biasa (ODE), beserta definisi fungsi model Lotka-Volterra.
+
+\begin{lstlisting}[language=Python]
+import numpy as np # Untuk perhitungan matriks
+import matplotlib.pyplot as plt # Untuk Visualisasi
+from scipy.integrate import odeint # Untuk perhitungan persamaan differensial (LSODA)
+\end{lstlisting}
+
+\subsection{Persamaan Differensial Lotka-Volterra}
+
+Model Lotka-Volterra didefinisikan melalui sistem dua persamaan diferensial biasa (ODE) orde pertama yang saling bergantungan:
+
+\begin{enumerate}
+    \item \textbf{Populasi Mangsa (Prey):}
+    $$ \frac{dx}{dt} = \alpha x - \beta xy $$
+
+    \item \textbf{Populasi Pemangsa (Predator):}
+    $$ \frac{dy}{dt} = \delta xy - \gamma y $$
+\end{enumerate}
+
+\textbf{Keterangan Parameter:}
+\begin{itemize}
+    \item $x$: Jumlah populasi mangsa (misal: Kelinci).
+    \item $y$: Jumlah populasi pemangsa (misal: Serigala).
+    \item $\alpha$: Laju pertumbuhan intrinsik mangsa (kelahiran).
+    \item $\beta$: Laju predasi (seberapa sering mangsa dimangsa oleh predator).
+    \item $\delta$: Efisiensi konversi mangsa menjadi pertumbuhan populasi predator.
+    \item $\gamma$: Laju kematian alami predator.
+\end{itemize}
+
+\textbf{Titik Ekuilibrium:}\\
+Sistem ini memiliki titik ekuilibrium non-trivial (di mana populasi tidak berubah) pada koordinat:
+$$ x^* = \frac{\gamma}{\delta}, \quad y^* = \frac{\alpha}{\beta} $$
+
+\begin{lstlisting}[language=Python]
+def lotka_volterra(z, t, alpha, beta, delta, gamma, H=0):
+    x, y = z
+    dxdt = alpha * x - beta * x * y - (H * x)
+    dydt = delta * x * y - gamma * y - (H * y)
+    return [dxdt, dydt]
+\end{lstlisting}
+
+\subsection{Initial State}
+Kondisi awal mendefinisikan rentang waktu simulasi dan jumlah populasi mula-mula dari mangsa dan predator.
+
+\begin{lstlisting}[language=Python]
+t = np.linspace(0, 100, 1000) # Timeframe dari 0 - 100 dan dibagi menjadi 1000 titik data
+z0 = [10, 5] # Populasi awal [prey, predator]
+\end{lstlisting}
+
+\subsection{Time-Series dan Phase Potrait}
+Berikut adalah implementasi kode untuk mengeksplorasi beberapa skenario parameter serta memvisualisasikan hasilnya menggunakan Time-Series dan Phase Portrait.
+
+\begin{lstlisting}[language=Python]
+# Parameter Set
+param_sets = [
+    {'params': (1.0, 0.10, 0.075, 1.5), 'title': 'Set 1: Baseline'},
+    {'params': (0.5, 0.10, 0.075, 1.5), 'title': 'Set 2: Reduced Alpha (Low Growth)'},
+    {'params': (1.0, 0.05, 0.075, 1.5), 'title': 'Set 3: Reduced Beta (Low Predation)'}
+]
+
+all_solutions = []
+all_equilibriums = []
+
+# Iterasi Parameter Sweep (Kiri: Time Series, Kanan: Phase Portrait)
+for s in param_sets:
+    alpha, beta, delta, gamma = s['params']
+    
+    # Hitung Ekuilibrium: x* = gamma/delta, y* = alpha/beta
+    x_eq = gamma / delta
+    y_eq = alpha / beta
+    all_equilibriums.append((x_eq, y_eq))
+    
+    # Selesaikan ODE
+    sol = odeint(lotka_volterra, z0, t, args=s['params'])
+    all_solutions.append(sol)
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+    
+    # Plot Kiri: Time Series
+    ax1.plot(t, sol[:, 0], 'b-', label='Prey')
+    ax1.plot(t, sol[:, 1], 'r-', label='Predator')
+    ax1.set_title(f"Time Series - {s['title']}")
+    ax1.set_xlabel("Waktu")
+    ax1.set_ylabel("Populasi")
+    ax1.legend()
+    ax1.grid(True)
+    
+    # Plot Kanan: Phase Portrait dengan Titik Ekuilibrium
+    ax2.plot(sol[:, 0], sol[:, 1], 'g-')
+    ax2.plot(x_eq, y_eq, 'ko', markersize=8, label=f'Ekuilibrium ({x_eq:.1f}, {y_eq:.1f})')
+    ax2.set_title(f"Phase Portrait - {s['title']}")
+    ax2.set_xlabel("Prey")
+    ax2.set_ylabel("Predator")
+    ax2.legend()
+    ax2.grid(True)
+    
+    plt.tight_layout()
+    plt.show()
+
+# Plot Gabungan Phase Portrait
+plt.figure(figsize=(10, 8))
+colors = ['green', 'magenta', 'cyan']
+
+for i, sol in enumerate(all_solutions):
+    p = param_sets[i]['params']
+    eq = all_equilibriums[i]
+    label_text = f"Set {i+1} (\alpha={p[0]}, \beta={p[1]})"
+    
+    # Plot garis lintasan
+    line, = plt.plot(sol[:, 0], sol[:, 1], color=colors[i], label=label_text)
+    # Plot titik ekuilibrium dengan warna yang sama namun bentuk titik
+    plt.plot(eq[0], eq[1], 'o', color=line.get_color(), markeredgecolor='black', markersize=10)
+
+plt.title("Perbandingan Gabungan: Phase Portraits & Equilibriums")
+plt.xlabel("Prey Population")
+plt.ylabel("Predator Population")
+plt.legend()
+plt.grid(True)
+plt.show()
+\end{lstlisting}
+
+\includegraphics[width=1\textwidth]{Output1.png}
+\includegraphics[width=1\textwidth]{Output2.png}
+\includegraphics[width=1\textwidth]{Output3.png}
+\includegraphics[width=1\textwidth]{Output4.png}
+
+\subsection{Analysis Question}
+\begin{enumerate}
+    \item How does reducing $\alpha$ affect the predator population?
+    \item What happens to $x^* = \frac{\gamma}{\delta}$ when $\delta$ doubles?
+    \item Add a hunting term - $H$ to the prey equation, what changes?
+    \item Connect your finding to Volterra's fishing paradox.
+\end{enumerate}
+
+\vspace{0.5cm}
+\textbf{Setup Parameter Baseline untuk Analisis}
+\begin{lstlisting}[language=Python]
+# Kode tambahan untuk menjawab Analysis Question
+
+# Parameter Baseline
+alpha_b, beta_b, delta_b, gamma_b = 1.0, 0.1, 0.075, 1.5
+
+# Fungsi Model dengan penambahan term hunting (H) pada mangsa
+def model_dinamika(z, t, a, b, d, g, H=0):
+    x, y = z
+    dxdt = (a - H) * x - b * x * y 
+    dydt = d * x * y - g * y
+    return [dxdt, dydt]
+
+sol_base = odeint(model_dinamika, z0, t, args=(alpha_b, beta_b, delta_b, gamma_b))
+x_eq_base = gamma_b / delta_b
+y_eq_base = alpha_b / beta_b
+\end{lstlisting}
+
+\subsection*{Answer 1}
+Parameter $\alpha$ adalah laju pertumbuhan alami mangsa (prey). Berdasarkan rumus ekuilibrium predator, yaitu $y^* = \frac{\alpha}{\beta}$:
+
+Jika $\alpha$ dikecilkan (sumber makanan tumbuh lebih lambat), maka populasi ekuilibrium predator ($y^*$) akan menurun. Secara ekologis, ekosistem tidak lagi mampu menopang jumlah predator sebanyak sebelumnya karena suplai makanan utamanya lambat beregenerasi.
+
+\begin{lstlisting}[language=Python]
+alpha_baru = 0.5
+y_eq_turun = alpha_baru / beta_b
+print(f"Alpha turun dari 1.0 ke 0.5")
+print(f"Predator Ekuilibrium turun dari {y_eq_base:.1f} menjadi {y_eq_turun:.1f}\n")
+
+sol_1 = odeint(model_dinamika, z0, t, args=(alpha_baru, beta_b, delta_b, gamma_b))
+
+plt.figure(figsize=(8, 6))
+plt.plot(sol_base[:, 0], sol_base[:, 1], 'grey', alpha=0.5, label='Baseline')
+plt.plot(sol_1[:, 0], sol_1[:, 1], 'blue', label='Alpha = 0.5')
+plt.plot(x_eq_base, y_eq_turun, 'bo', markersize=8, label=f'Ekuilibrium Baru ({x_eq_base:.1f}, {y_eq_turun:.1f})')
+
+plt.title("Skenario 1: Dampak Penurunan Pertumbuhan Mangsa")
+plt.xlabel("Populasi Mangsa (Prey)")
+plt.ylabel("Populasi Pemangsa (Predator)")
+plt.legend()
+plt.grid(True)
+plt.show()
+\end{lstlisting}
+
+\includegraphics[width=1\textwidth]{Output5.png}
+
+\subsection*{Answer 2}
+Parameter $\delta$ mewakili efisiensi predator dalam mengubah mangsa yang dimakan menjadi populasi baru (reproduksi predator). Jika $\delta$ digandakan menjadi $2\delta$, maka rumus ekuilibrium mangsa berubah menjadi:
+$$ x^* = \frac{\gamma}{2\delta} $$
+
+Ini berarti populasi ekuilibrium mangsa akan berkurang menjadi setengahnya (turun 50\%). Karena predator menjadi dua kali lipat lebih efisien dalam berkembang biak, mereka hanya membutuhkan setengah dari jumlah mangsa biasa untuk bertahan hidup dan menjaga kestabilan populasinya.
+
+\begin{lstlisting}[language=Python]
+delta_ganda = delta_b * 2
+x_eq_ganda = gamma_b / delta_ganda
+print(f"Delta ganda dari {delta_b} ke {delta_ganda}")
+print(f"Mangsa Ekuilibrium terbagi dua dari {x_eq_base:.1f} menjadi {x_eq_ganda:.1f}\n")
+
+sol_2 = odeint(model_dinamika, z0, t, args=(alpha_b, beta_b, delta_ganda, gamma_b))
+
+plt.figure(figsize=(8, 6))
+plt.plot(sol_base[:, 0], sol_base[:, 1], 'grey', alpha=0.5, label='Baseline')
+plt.plot(sol_2[:, 0], sol_2[:, 1], 'green', label='Delta = 0.150')
+plt.plot(x_eq_ganda, y_eq_base, 'go', markersize=8, label=f'Ekuilibrium Baru ({x_eq_ganda:.1f}, {y_eq_base:.1f})')
+
+plt.title("Skenario 2: Dampak Peningkatan Efisiensi Predator")
+plt.xlabel("Populasi Mangsa (Prey)")
+plt.ylabel("Populasi Pemangsa (Predator)")
+plt.legend()
+plt.grid(True)
+plt.show()
+\end{lstlisting}
+
+\includegraphics[width=1\textwidth]{Output6.png}
+
+\subsection*{Answer 3}
+Jika kita menambahkan tingkat perburuan proporsional $-Hx$ pada persamaan mangsa, fungsi turunannya menjadi:
+$$ \frac{dx}{dt} = \alpha x - \beta xy - Hx = (\alpha - H)x - \beta xy $$
+
+Hal utama yang berubah adalah ekuilibrium predator. Nilai laju pertumbuhan mangsa secara efektif berkurang menjadi $(\alpha - H)$. Akibatnya, titik stabil populasi predator turun menjadi $y^* = \frac{\alpha - H}{\beta}$. Perburuan mangsa oleh manusia secara langsung memotong jatah makanan predator liar, sehingga jumlah predator di ekosistem tersebut akan menyusut.
+
+\begin{lstlisting}[language=Python]
+H_val = 0.2
+y_eq_hunt = (alpha_b - H_val) / beta_b
+print(f"Term Hunting H={H_val} ditambahkan pada mangsa")
+print(f"Predator Ekuilibrium menyusut dari {y_eq_base:.1f} menjadi {y_eq_hunt:.1f}\n")
+
+sol_3 = odeint(model_dinamika, z0, t, args=(alpha_b, beta_b, delta_b, gamma_b, H_val))
+
+plt.figure(figsize=(8, 6))
+plt.plot(sol_base[:, 0], sol_base[:, 1], 'grey', alpha=0.5, label='Baseline')
+plt.plot(sol_3[:, 0], sol_3[:, 1], 'red', label='Hunting (H=0.2)')
+plt.plot(x_eq_base, y_eq_hunt, 'ro', markersize=8, label=f'Ekuilibrium Baru ({x_eq_base:.1f}, {y_eq_hunt:.1f})')
+
+plt.title("Skenario 3: Dampak Perburuan/Penangkapan Mangsa")
+plt.xlabel("Populasi Mangsa (Prey)")
+plt.ylabel("Populasi Pemangsa (Predator)")
+plt.legend()
+plt.grid(True)
+plt.show()
+\end{lstlisting}
+
+\includegraphics[width=1\textwidth]{Output7.png}
+
+\subsection*{Answer 4}
+Paradoks memancing Volterra muncul ketika perburuan/penangkapan ikan ($H$) diterapkan pada kedua spesies secara bersamaan secara proporsional. Jika kita menerapkan $-Hx$ pada ikan kecil (mangsa) dan $-Hy$ pada hiu (predator):
+
+\begin{itemize}
+    \item \textbf{Ekuilibrium Mangsa ($x^*$):} Berubah dari $\frac{\gamma}{\delta}$ menjadi $\frac{\gamma + H}{\delta}$ (Meningkat akibat semakin besar perburuan semakin besar jumlah mangsa).
+    \item \textbf{Ekuilibrium Predator ($y^*$):} Berubah dari $\frac{\alpha}{\beta}$ menjadi $\frac{\alpha - H}{\beta}$ (Menurun akibat semakin besar perburuan semakin sedikit jumlah predator).
+\end{itemize}
+
+\textbf{Volterra's Paradox:} Menangkap ikan secara merata di suatu perairan justru menguntungkan populasi ikan mangsa dan menghancurkan populasi ikan predator. Fenomena ini memecahkan misteri biologi pasca Perang Dunia I: Ketika aktivitas nelayan terhenti sepenuhnya selama perang dunia ($H=0$), proporsi ikan predator melonjak tajam. Namun, saat perang usai dan nelayan kembali menjaring ikan secara masif ($H>0$), tangkapan ikan predator merosot sedangkan ikan mangsa kembali melimpah ruah.
+
+\subsection{Repository}
+Kode Google Colab dari simulasi ini dapat diakses melalui tautan berikut:\\
+\href{https://colab.research.google.com/drive/1lUyZS-1hdU1RR1_aT1AD1Q04ZgBPE7xs?usp=sharing}{\textbf{Link Google Colab: Lotka-Volterra Simulation}}
+
+https://colab.research.google.com/drive/1lUyZS-1hdU1RR1_aT1AD1Q04ZgBPE7xs?usp=sharing
+
+\end{document}

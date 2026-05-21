@@ -1,0 +1,643 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[bahasa]{babel}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{url}
+\usepackage{hyperref}
+
+\geometry{a4paper, margin=2.5cm}
+
+% Konfigurasi nomor halaman kanan bawah saja
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[R]{\thepage}
+
+\renewcommand{\thesubsection}{\Alph{subsection}}
+
+% Definisi bahasa GLSL untuk listing
+\lstdefinelanguage{GLSL}{
+    keywords={attribute, const, uniform, varying, layout, centroid, flat, smooth,
+              noperspective, break, continue, do, for, while, switch, case, default,
+              if, else, in, out, inout, float, int, void, bool, true, false, invariant,
+              discard, return, mat2, mat3, mat4, vec2, vec3, vec4, ivec2, ivec3, ivec4,
+              bvec2, bvec3, bvec4, sampler2D, samplerCube, struct},
+    keywordstyle=\bfseries\color{blue!70!black},
+    morecomment=[l]{//},
+    morecomment=[s]{/*}{*/},
+    commentstyle=\itshape\color{gray},
+    morestring=[b]",
+    stringstyle=\ttfamily,
+    sensitive=true
+}
+
+\lstdefinelanguage{Cpp}{
+    keywords={auto, bool, break, case, char, class, const, constexpr, continue,
+              default, delete, do, double, else, enum, explicit, extern, false,
+              float, for, friend, if, inline, int, long, namespace, new, nullptr,
+              operator, private, protected, public, return, short, signed, sizeof,
+              static, struct, switch, template, this, throw, true, try, typedef,
+              typename, union, unsigned, using, virtual, void, while},
+    keywordstyle=\bfseries\color{blue!70!black},
+    morecomment=[l]{//},
+    morecomment=[s]{/*}{*/},
+    commentstyle=\itshape\color{gray},
+    morestring=[b]",
+    stringstyle=\ttfamily\color{red!60!black},
+    sensitive=true
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    language=Cpp,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    keywordstyle=\bfseries,
+    commentstyle=\itshape,
+    stringstyle=\ttfamily,
+    showstringspaces=false,
+    tabsize=2,
+    xleftmargin=1em,
+    framexleftmargin=1em
+}
+
+\def\UrlBreaks{\do\/\do-\do_}
+
+\begin{document}
+
+% ============================================================
+% HALAMAN JUDUL
+% ============================================================
+\begin{titlepage}
+    \centering
+
+    {\LARGE\textbf{LAPORAN TUGAS TEKNIK}}\\
+    \vspace{0.3cm}
+    {\LARGE\textbf{VISUALISASI GRAFIS}}\\
+    \vspace{1cm}
+
+    {\Large\textbf{Implementasi 3D Renderer dengan OpenGL}}\\
+
+    \vspace{2cm}
+
+    \includegraphics[width=0.5\textwidth]{logo_ugm.png}
+
+    \vspace{2cm}
+
+    {\large
+    \begin{tabular}{cc}
+        \textbf{Garjita Adicandra}        & \textbf{M. Nabil Fitriansyah B.}              \\
+        NIM: 24/535330/TK/59377           & NIM: 24/545232/TK/60628          \\
+    \end{tabular}
+    }
+
+    \vfill
+
+    {\large
+    Departemen Teknik Elektro dan Teknologi Informasi\\
+    Fakultas Teknik\\
+    Universitas Gadjah Mada\\
+    2026
+    }
+\end{titlepage}
+
+\newpage
+\tableofcontents
+\newpage
+
+% ============================================================
+% A. GAMBARAN UMUM
+% ============================================================
+\subsection{Gambaran Umum Proyek}
+Proyek ini mengimplementasikan sebuah 3D renderer sederhana menggunakan OpenGL 4.6 Core Profile. Aplikasi memuat file model 3D (\texttt{.glb}/\texttt{.obj}), merendernya dengan pencahayaan Phong, dan menyediakan empat konfigurasi matriks kamera/proyeksi yang dapat dipilih secara interaktif. Beberapa tech stack yang digunakan:
+
+\begin{itemize}
+    \item \textbf{Languange:} C++17, GLSL 460.
+    \item \textbf{Library:} GLFW (window/input), GLAD (OpenGL loader), GLM (math), Assimp (model loader), stb\_image (texture loader).
+    \item \textbf{Build:} CMake $\geq$ 3.10.
+\end{itemize}
+
+% ============================================================
+% B. STRUKTUR PROYEK & KONFIGURASI
+% ============================================================
+\subsection{Struktur Proyek dan Konfigurasi}
+
+Proyek dibagi menjadi beberapa class:
+
+\begin{itemize}
+    \item \texttt{main.cpp} -- orkestrator: window, loop render, dispatch ke modul lain.
+    \item \texttt{Shader.h/cpp} -- baca file GLSL, kompilasi, kirim uniform ke GPU.
+    \item \texttt{Camera.h/cpp} -- kamera FPS dengan kontrol WASD + mouse look.
+    \item \texttt{Model.h/cpp} -- loader file 3D menggunakan Assimp.
+    \item \texttt{Mesh.h/cpp} -- representasi geometri di GPU memory (VBO/VAO/EBO).
+    \item \texttt{shaders/phong.vert}, \texttt{shaders/phong.frag} -- shader GPU.
+\end{itemize}
+
+Seluruh parameter tunable disentralisasi di sebuah \texttt{namespace Config} di bagian atas \texttt{main.cpp}, sehingga modifikasi (skala model, posisi lampu, FOV, dst.) cukup dilakukan di satu tempat.
+
+\begin{lstlisting}[language=Cpp]
+namespace Config {
+    constexpr unsigned int WindowWidth  = 1280;
+    constexpr unsigned int WindowHeight = 720;
+
+    constexpr const char* ModelPath      = "../models/magikarp-shiny-pokemon/source/Magikarp.glb";
+    constexpr const char* VertShaderPath = "../shaders/phong.vert";
+    constexpr const char* FragShaderPath = "../shaders/phong.frag";
+
+    constexpr float ModelScale     = 1.0f;
+    constexpr float ShowcaseScale  = 0.25f;
+    constexpr float ModelSpacing   = 2.5f;
+    constexpr float SpinSpeed      = 0.3f;
+
+    const glm::vec3 LightAmbient  {0.4f, 0.4f, 0.4f};
+    const glm::vec3 LightDiffuse  {0.8f, 0.8f, 0.8f};
+    const glm::vec3 LightSpecular {1.0f, 1.0f, 1.0f};
+    constexpr float LightOrbitRadius = 3.0f;
+    constexpr float LightOrbitSpeed  = 0.7f;
+
+    constexpr float OrthoSize     = 8.0f;
+    constexpr float TopDownFov    = 60.0f;
+    constexpr float TopDownHeight = 8.0f;
+    constexpr float ShowcaseFov   = 45.0f;
+}
+\end{lstlisting}
+
+Penggunaan \texttt{constexpr} memastikan nilai-nilai ini dievaluasi saat compile-time (nol overhead runtime), sedangkan \texttt{glm::vec3/vec4} dideklarasikan dengan \texttt{const} karena konstruktornya tidak selalu \texttt{constexpr} di seluruh versi GLM.
+
+% ============================================================
+% C. IMPLEMENTASI PHONG SHADER (Item 2)
+% ============================================================
+\subsection{Implementasi Phong Shader: Vertex Shader}
+
+Vertex shader bertugas menghitung posisi akhir vertex di layar (\texttt{gl\_Position}) dan menyiapkan data turunan (world position, world normal) untuk fragment shader. Persamaan dasarnya:
+$$ p_{layar} = M_{projection} \cdot M_{view} \cdot M_{model} \cdot p_{lokal} $$
+
+Normal di-transform dengan \textbf{normal matrix} $(M_{model}^{-1})^T$ agar tetap tegak lurus permukaan meskipun model di-non-uniformly scaled.
+
+\begin{lstlisting}[language=GLSL]
+#version 460 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+
+out vec3 FragPos;
+out vec3 Normal;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+void main() {
+    FragPos = vec3(model * vec4(aPos, 1.0));
+    Normal  = mat3(transpose(inverse(model))) * aNormal;
+    gl_Position = projection * view * vec4(FragPos, 1.0);
+}
+\end{lstlisting}
+
+\subsection{Implementasi Phong Shader: Fragment Shader}
+
+Fragment shader menghitung warna tiap pixel sebagai jumlah tiga komponen pencahayaan Phong:
+
+\begin{enumerate}
+    \item \textbf{Ambient:} $I_a = k_a \cdot L_a$ -- cahaya dasar konstan.
+    \item \textbf{Diffuse:} $I_d = k_d \cdot L_d \cdot \max(\hat{n} \cdot \hat{l}, 0)$ -- terang tergantung sudut normal terhadap arah lampu.
+    \item \textbf{Specular:} $I_s = k_s \cdot L_s \cdot \max(\hat{v} \cdot \hat{r}, 0)^{n_s}$ -- kilau, tergantung sudut pantul cahaya vs arah pandang.
+\end{enumerate}
+
+\begin{lstlisting}[language=GLSL]
+#version 460 core
+out vec4 FragColor;
+
+in vec3 FragPos;
+in vec3 Normal;
+
+struct Material {
+    vec3  ambient;
+    vec3  diffuse;
+    vec3  specular;
+    float shininess;
+};
+
+struct Light {
+    vec3 position;
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+};
+
+uniform Material material;
+uniform Light    light;
+uniform vec3     viewPos;
+
+void main() {
+    vec3 ambient = light.ambient * material.ambient;
+
+    vec3 norm     = normalize(Normal);
+    vec3 lightDir = normalize(light.position - FragPos);
+    float diff    = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse  = light.diffuse * (diff * material.diffuse);
+
+    vec3 viewDir    = normalize(viewPos - FragPos);
+    vec3 reflectDir = reflect(-lightDir, norm);
+    float spec      = pow(max(dot(viewDir, reflectDir), 0.0), material.shininess);
+    vec3 specular   = light.specular * (spec * material.specular);
+
+    FragColor = vec4(ambient + diffuse + specular, 1.0);
+}
+\end{lstlisting}
+
+\subsection{Sistem Material}
+
+Setiap material punya nilai ambient/diffuse/specular/shininess yang berbeda, sehingga objek yang sama (model Magikarp) bisa terlihat berbeda-beda total. Beberapa material yang disimulasikan adalah gold, silver, ruby, emerald, cyan plastic, dan green rubber.
+
+\begin{lstlisting}[language=Cpp]
+struct MaterialPreset {
+    const char* name;
+    glm::vec3   ambient;
+    glm::vec3   diffuse;
+    glm::vec3   specular;
+    float       shininess;
+};
+
+constexpr std::array<MaterialPreset, 6> MATERIALS{{
+    {"gold",         {0.24725f, 0.1995f,  0.0745f }, {0.75164f, 0.60648f, 0.22648f}, {0.628281f, 0.555802f, 0.366065f}, 0.4f      },
+    {"silver",       {0.19225f, 0.19225f, 0.19225f}, {0.50754f, 0.50754f, 0.50754f}, {0.508273f, 0.508273f, 0.508273f}, 0.4f      },
+    {"ruby",         {0.1745f,  0.01175f, 0.01175f}, {0.61424f, 0.04136f, 0.04136f}, {0.727811f, 0.626959f, 0.626959f}, 0.6f      },
+    {"emerald",      {0.0215f,  0.1745f,  0.0215f }, {0.07568f, 0.61424f, 0.07568f}, {0.633f,    0.727811f, 0.633f   }, 0.6f      },
+    {"cyan_plastic", {0.0f,     0.1f,     0.06f   }, {0.0f,     0.50980f, 0.50980f}, {0.50196f,  0.50196f,  0.50196f }, 0.25f     },
+    {"green_rubber", {0.0f,     0.05f,    0.0f    }, {0.4f,     0.5f,     0.4f    }, {0.04f,     0.7f,      0.04f    }, 0.078125f},
+}};
+\end{lstlisting}
+
+Pengiriman material ke GPU diabstraksi via helper \texttt{applyMaterial()} agar tidak duplikatif:
+
+\begin{lstlisting}[language=Cpp]
+void applyMaterial(const Shader& shader, const MaterialPreset& mat) {
+    shader.setVec3 ("material.ambient",   mat.ambient);
+    shader.setVec3 ("material.diffuse",   mat.diffuse);
+    shader.setVec3 ("material.specular",  mat.specular);
+    shader.setFloat("material.shininess", mat.shininess * 128.0f);
+}
+\end{lstlisting}
+
+Nilai \texttt{shininess} dikalikan 128 karena tabel referensi menggunakan skala 0--1, sedangkan fungsi \texttt{pow()} di shader mengharapkan bilangan bulat eksponen.
+
+% ============================================================
+% E. LOADING MODEL 3D (Item 3)
+% ============================================================
+\subsection{Loader Model 3D dengan Assimp}
+
+Library \texttt{Assimp} digunakan untuk membaca file model 3D dalam berbagai format (\texttt{.obj}, \texttt{.glb}, \texttt{.fbx}, dst.) dan mengkonversinya ke struktur data internal yang seragam. Empat flag preprocessing diaktifkan:
+
+\begin{itemize}
+    \item \texttt{aiProcess\_Triangulate} -- konversi semua face ke triangle (kebutuhan OpenGL primitif).
+    \item \texttt{aiProcess\_GenSmoothNormals} -- generate normal bila tidak ada, dengan smoothing pada vertex bersama.
+    \item \texttt{aiProcess\_FlipUVs} -- balik koordinat V karena OpenGL mengikuti konvensi origin di kiri-bawah, sedangkan kebanyakan DCC tool (Blender, 3DSMax) menggunakan kiri-atas.
+    \item \texttt{aiProcess\_JoinIdenticalVertices} -- merge vertex duplikat untuk hemat memori GPU.
+\end{itemize}
+
+\begin{lstlisting}[language=Cpp]
+void Model::loadModel(const std::string& path) {
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(path,
+        aiProcess_Triangulate     |
+        aiProcess_GenSmoothNormals|
+        aiProcess_FlipUVs         |
+        aiProcess_JoinIdenticalVertices);
+
+    if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
+        std::cerr << "ASSIMP ERROR: " << importer.GetErrorString() << "\n";
+        return;
+    }
+    processNode(scene->mRootNode, scene);
+}
+\end{lstlisting}
+
+Karena file 3D umumnya memiliki \textbf{scene graph} (hierarki node bersarang), traversal dilakukan rekursif:
+
+\begin{lstlisting}[language=Cpp]
+void Model::processNode(aiNode* node, const aiScene* scene) {
+    for (unsigned int i = 0; i < node->mNumMeshes; i++) {
+        aiMesh* mesh = scene->mMeshes[node->mMeshes[i]];
+        meshes.push_back(processMesh(mesh, scene));
+    }
+    for (unsigned int i = 0; i < node->mNumChildren; i++)
+        processNode(node->mChildren[i], scene);
+}
+\end{lstlisting}
+
+\subsection{VBO, EBO, dan VAO untuk Komunikasi ke GPU}
+
+Tiap mesh di-upload ke GPU memory melalui tiga buffer object:
+
+\begin{itemize}
+    \item \textbf{VBO (Vertex Buffer Object)} -- menyimpan data vertex (position, normal, texcoord).
+    \item \textbf{EBO (Element Buffer Object)} -- menyimpan indeks segitiga, sehingga vertex dapat di-reuse.
+    \item \textbf{VAO (Vertex Array Object)} -- menyimpan konfigurasi binding VBO + EBO + layout attribute, sehingga rendering selanjutnya cukup memanggil satu \texttt{glBindVertexArray()}.
+\end{itemize}
+
+\begin{lstlisting}[language=Cpp]
+void Mesh::setupMesh() {
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    glBindVertexArray(VAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex),
+                 vertices.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int),
+                 indices.data(), GL_STATIC_DRAW);
+
+    // location 0 -- position
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          (void*)offsetof(Vertex, Position));
+    // location 1 -- normal
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          (void*)offsetof(Vertex, Normal));
+    // location 2 -- texcoord
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          (void*)offsetof(Vertex, TexCoords));
+
+    glBindVertexArray(0);
+}
+
+void Mesh::Draw(const Shader&) const {
+    glBindVertexArray(VAO);
+    glDrawElements(GL_TRIANGLES, (GLsizei)indices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
+\end{lstlisting}
+
+Penggunaan \texttt{GL\_STATIC\_DRAW} mengisyaratkan ke driver bahwa data tidak akan berubah, sehingga GPU dapat menyimpannya di lokasi memori paling efisien (umumnya VRAM langsung).
+
+% ============================================================
+% G. EMPAT KONFIGURASI MATRIX (Item 4)
+% ============================================================
+\subsection{Empat Mode Tampilan: Konfigurasi Matriks Model, View, dan Projection}
+
+Untuk menampilkan objek 3D di layar 2D, OpenGL membutuhkan tiga matriks utama:
+
+\begin{itemize}
+    \item \textbf{Matriks \textit{Model}} -- mengatur posisi, rotasi, dan ukuran objek di dunia 3D.
+    \item \textbf{Matriks \textit{View}} -- mengatur posisi dan arah pandang kamera.
+    \item \textbf{Matriks \textit{Projection}} -- mengatur jenis proyeksi: \textit{perspective} (ada efek jauh-kecil) atau \textit{orthographic} (ukuran konsisten).
+\end{itemize}
+
+Dengan kombinasi nilai ketiga matriks yang berbeda, objek yang sama dapat ditampilkan dengan sudut pandang dan gaya proyeksi yang berbeda. Aplikasi ini menyediakan empat mode yang dapat dipilih dengan menekan tombol \texttt{1}--\texttt{4} saat program berjalan:
+
+\begin{enumerate}
+    \item \textbf{Mode 1 -- DEFAULT (perspective + kamera FPS).} Pengguna dapat menggerakkan kamera bebas menggunakan \texttt{W A S D}, mengarahkan pandangan dengan mouse, dan mengubah FOV dengan scroll. Enam model dengan material berbeda berbaris dan berputar otomatis.
+
+    \item \textbf{Mode 2 -- ORTHO (orthographic).} Proyeksi paralel tanpa efek perspektif. Objek di belakang tidak terlihat lebih kecil dari objek di depan, sehingga proporsi sebenarnya antar objek mudah dibandingkan.
+
+    \item \textbf{Mode 3 -- TOPDOWN.} Kamera ditempatkan di atas scene dan diarahkan ke bawah. Setiap model dirotasi 90 derajat pada sumbu X agar wajahnya menghadap ke atas dan tetap terbaca dari sudut pandang ini.
+
+    \item \textbf{Mode 4 -- SHOWCASE.} Hanya satu model emas di tengah. Kamera diam pada posisi sinematik, sementara posisi lampu berubah mengorbit objek untuk memperlihatkan kilau (\textit{specular highlight}) yang menyapu permukaan.
+\end{enumerate}
+
+Logika pemilihan matriks dipusatkan di satu fungsi \texttt{buildViewProjection()} sehingga main loop tidak perlu tahu detail tiap mode -- cukup memanggil fungsi ini dan menerima dua matriks hasilnya.
+
+\begin{lstlisting}[language=Cpp]
+void buildViewProjection(SceneMode mode, glm::mat4& view, glm::mat4& projection) {
+    switch (mode) {
+    case MODE_ORTHO: {
+        float a = aspectRatio();
+        projection = glm::ortho(-Config::OrthoSize * a,  Config::OrthoSize * a,
+                                -Config::OrthoSize,      Config::OrthoSize,
+                                 Config::NearPlane,      Config::FarPlane);
+        view = glm::lookAt(Config::OrthoEye, glm::vec3(0.0f), glm::vec3(0, 1, 0));
+        break;
+    }
+    case MODE_TOPDOWN: {
+        projection = glm::perspective(glm::radians(Config::TopDownFov),
+                                      aspectRatio(),
+                                      Config::NearPlane, Config::FarPlane);
+        view = glm::lookAt(glm::vec3(0.0f, Config::TopDownHeight, 0.001f),
+                           glm::vec3(0.0f), glm::vec3(0, 1, 0));
+        break;
+    }
+    case MODE_SHOWCASE: {
+        projection = glm::perspective(glm::radians(Config::ShowcaseFov),
+                                      aspectRatio(),
+                                      Config::NearPlane, Config::FarPlane);
+        view = glm::lookAt(Config::ShowcaseEye, glm::vec3(0.0f), glm::vec3(0, 1, 0));
+        break;
+    }
+    case MODE_DEFAULT:
+    default: {
+        projection = glm::perspective(glm::radians(camera.Zoom),
+                                      aspectRatio(),
+                                      Config::NearPlane, Config::FarPlane);
+        view = camera.GetViewMatrix();
+        break;
+    }
+    }
+}
+\end{lstlisting}
+
+\textbf{Catatan teknis tiap mode:}
+
+\begin{itemize}
+    \item \textit{Mode DEFAULT} mengambil \texttt{camera.Zoom} sebagai FOV, sehingga nilai FOV dapat berubah saat pengguna scroll. View matrix dihasilkan oleh \texttt{camera.GetViewMatrix()} yang mengikuti posisi kamera real-time.
+
+    \item \textit{Mode ORTHO} mengalikan ukuran horizontal volume proyeksi dengan rasio aspek layar. Tanpa kompensasi ini, objek akan terlihat gepeng atau memanjang karena layar tidak berbentuk persegi.
+
+    \item \textit{Mode TOPDOWN} memberi nilai \texttt{0.001f} pada komponen $z$ posisi kamera. Tanpa offset ini, vektor pandangan dan vektor \textit{up} kamera akan sejajar sempurna, sehingga \texttt{lookAt} menghasilkan matriks tidak valid (NaN).
+
+    \item \textit{Mode SHOWCASE} mempertahankan kamera dan proyeksi tetap. Yang berubah hanya matriks \textit{model} (rotasi objek) dan posisi lampu, sehingga seluruh gerakan visual berasal dari objek dan pencahayaan, bukan kamera.
+\end{itemize}
+
+Untuk matriks \texttt{model}, transformasinya berbeda-beda tergantung mode dan posisi objek dalam barisan. Logika ini ada di fungsi \texttt{drawScene()}:
+
+\begin{lstlisting}[language=Cpp]
+void drawScene(const Shader& shader, const Model& model, SceneMode mode, float time) {
+    if (mode == MODE_SHOWCASE) {
+        glm::mat4 m{1.0f};
+        m = glm::rotate(m, time * Config::ShowcaseSpin, glm::vec3(0, 1, 0));
+        m = glm::scale (m, glm::vec3(Config::ShowcaseScale));
+        shader.setMat4("model", m);
+        applyMaterial(shader, MATERIALS[0]);   // gold
+        model.Draw(shader);
+        return;
+    }
+
+    const int n = static_cast<int>(MATERIALS.size());
+    for (int i = 0; i < n; i++) {
+        glm::mat4 m{1.0f};
+        m = glm::translate(m, glm::vec3((i - n / 2.0f) * Config::ModelSpacing, 0.0f, 0.0f));
+
+        if (mode == MODE_TOPDOWN) {
+            m = glm::rotate(m, glm::radians(90.0f), glm::vec3(1, 0, 0));
+        } else if (mode == MODE_DEFAULT) {
+            m = glm::rotate(m, time * (i + 1) * Config::SpinSpeed, glm::vec3(0.4f, 1.0f, 0.2f));
+        }
+        m = glm::scale(m, glm::vec3(Config::ModelScale));
+        shader.setMat4("model", m);
+
+        applyMaterial(shader, MATERIALS[i]);
+        model.Draw(shader);
+    }
+}
+\end{lstlisting}
+
+Perlu diperhatikan bahwa urutan transformasi adalah \textbf{translate, rotate, scale}. Urutan ini penting karena perkalian matriks tidak komutatif: jika rotasi dilakukan setelah translasi, objek akan berputar mengelilingi titik asal alih-alih berputar di posisinya sendiri.
+
+% ============================================================
+% H. RENDER LOOP TERPADU
+% ============================================================
+\subsection{Render Loop: Apa yang Terjadi Tiap Frame}
+
+Aplikasi 3D bekerja dengan menggambar ulang seluruh layar puluhan kali per detik. Kode yang menggambar satu frame berada di dalam \texttt{while}-loop berikut:
+
+\begin{lstlisting}[language=Cpp]
+while (!glfwWindowShouldClose(window)) {
+    float now = static_cast<float>(glfwGetTime());
+    deltaTime = now - lastFrame;
+    lastFrame = now;
+
+    processInput(window);
+
+    glClearColor(Config::ClearColor.r, Config::ClearColor.g,
+                 Config::ClearColor.b, Config::ClearColor.a);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glm::mat4 view, projection;
+    buildViewProjection(sceneMode, view, projection);
+
+    shader.use();
+    shader.setMat4("projection", projection);
+    shader.setMat4("view",       view);
+
+    uploadLight(shader, computeLightPosition(sceneMode, now));
+    drawScene  (shader, model, sceneMode, now);
+
+    glfwSwapBuffers(window);
+    glfwPollEvents();
+}
+\end{lstlisting}
+
+Berikut yang terjadi setiap kali loop berputar (umumnya 60--144 kali per detik tergantung GPU):
+
+\begin{enumerate}
+    \item \textbf{Hitung \texttt{deltaTime}.} Selisih waktu antara frame ini dan frame sebelumnya. Nilai ini dipakai untuk menjaga pergerakan kamera konsisten di komputer cepat maupun lambat (\textit{frame-rate independent}).
+
+    \item \textbf{Baca input keyboard dan mouse.} Cek tombol yang ditekan, lalu update posisi kamera atau ganti mode tampilan.
+
+    \item \textbf{Bersihkan layar.} Hapus gambar frame sebelumnya dengan warna latar (\texttt{glClearColor}) dan reset \textit{depth buffer} agar perhitungan ``objek mana di depan'' dimulai dari awal.
+
+    \item \textbf{Bangun matriks view dan projection.} Panggil \texttt{buildViewProjection()} sesuai mode aktif.
+
+    \item \textbf{Aktifkan shader dan kirim uniform global.} Beri tahu GPU shader mana yang dipakai, lalu kirim matriks view/projection, posisi lampu, warna lampu, dan posisi kamera. Data ini berlaku untuk semua objek di frame ini.
+
+    \item \textbf{Gambar seluruh objek.} Loop melalui daftar material, set matriks \textit{model} dan material per objek, lalu panggil \texttt{glDrawElements} untuk merender.
+
+    \item \textbf{Tampilkan ke layar.} \texttt{glfwSwapBuffers} menukar buffer belakang (tempat gambar dibangun) dengan buffer depan (yang ditampilkan ke monitor). Ini mencegah \textit{tearing} dan flicker.
+
+    \item \textbf{Proses event sistem.} \texttt{glfwPollEvents} memeriksa event seperti tombol close jendela, resize, atau gerakan mouse, lalu memanggil callback yang sesuai.
+\end{enumerate}
+
+Loop ini terus berjalan sampai pengguna menekan ESC atau menutup jendela.
+
+% ============================================================
+% I. SCREENSHOT
+% ============================================================
+\subsection{Screenshot Hasil}
+
+Berikut tampilan aplikasi pada keempat mode. Pengguna dapat berpindah mode kapan saja dengan menekan tombol \texttt{1}--\texttt{4} tanpa perlu menutup dan membuka ulang aplikasi.
+
+\textbf{Mode 1 -- DEFAULT.} Enam Magikarp dengan material berbeda (emas, perak, rubi, zamrud, plastik cyan, karet hijau) berbaris dan berputar otomatis. Kamera dapat digerakkan bebas sehingga objek dapat didekati, dijauhi, atau diputari dari sudut manapun.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{Screenshot_Mode1_Default.png}
+    \caption{Mode DEFAULT: proyeksi perspective dengan kamera FPS.}
+\end{figure}
+
+\textbf{Mode 2 -- ORTHO.} Tidak ada efek perspektif. Ukuran objek tidak bergantung pada jaraknya ke kamera, sehingga proporsi sebenarnya antar objek terlihat akurat.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{Screenshot_Mode2_Ortho.png}
+    \caption{Mode ORTHO: proyeksi paralel tanpa distorsi perspektif.}
+\end{figure}
+
+\textbf{Mode 3 -- TOPDOWN.} Kamera diposisikan di atas scene dan diarahkan ke bawah. Setiap Magikarp dimiringkan 90 derajat agar wajahnya menghadap ke atas dan tetap terbaca dari sudut ini.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{Screenshot_Mode3_TopDown.png}
+    \caption{Mode TOPDOWN: kamera dari atas dengan model dirotasi.}
+\end{figure}
+
+\textbf{Mode 4 -- SHOWCASE.} Hanya satu model emas di tengah scene. Lampu mengorbit penuh agar kilau (\textit{specular highlight}) terlihat menyapu permukaan emas. Mode ini menonjolkan komponen specular dari Phong shading.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{Screenshot_Mode4_Showcase.png}
+    \caption{Mode SHOWCASE: kilau specular mengikuti orbit lampu.}
+\end{figure}
+
+% ============================================================
+% J. KESIMPULAN
+% ============================================================
+\subsection{Kesimpulan}
+
+Proyek ini sudah memenuhi tiga deliverable utama tugas:
+
+\begin{enumerate}
+    \item \textbf{Phong shader} diimplementasikan dengan vertex shader dan fragment shader yang terpisah. Tiga komponen warna (\textit{ambient}, \textit{diffuse}, \textit{specular}) dihitung tiap pixel sehingga hasilnya halus dan kilauan terlihat alami. Enam jenis material berbeda dapat dirender bersamaan dalam satu scene.
+
+    \item \textbf{Loader model 3D} memakai Assimp, sehingga aplikasi dapat memuat berbagai format file (\texttt{.obj}, \texttt{.glb}, \texttt{.fbx}, dll.) tanpa menulis parser sendiri. Data geometri dititip ke GPU melalui tiga buffer (VBO, EBO, VAO), membuat rendering efisien karena GPU tidak perlu menerima data ulang setiap frame.
+
+    \item \textbf{Empat mode tampilan} (DEFAULT, ORTHO, TOPDOWN, SHOWCASE) dapat diganti instan dengan menekan tombol angka tanpa restart aplikasi. Tiap mode menunjukkan bagaimana variasi matriks \textit{model}, \textit{view}, dan \textit{projection} menghasilkan kesan visual yang berbeda dari objek yang sama.
+\end{enumerate}
+
+Selain memenuhi requirement, kode disusun modular: tiap file punya satu tanggung jawab (\texttt{Shader} untuk GPU, \texttt{Camera} untuk kontrol input, \texttt{Model} untuk loading file, \texttt{Mesh} untuk geometri). Seluruh parameter yang sering diubah-ubah (skala, posisi lampu, FOV, dll.) disatukan di \texttt{namespace Config} di atas \texttt{main.cpp}, sehingga modifikasi cukup dilakukan di satu tempat tanpa menyentuh banyak file.
+
+% ============================================================
+% K. REPOSITORY
+% ============================================================
+\subsection{Repository dan Cara Menjalankan}
+Kode sumber lengkap proyek ini dapat diakses melalui tautan berikut:\\
+\href{https://github.com/gadicandra/TVG-OpenGL}{\textbf{Link Repository GitHub: TVG-OpenGL}}
+
+\vspace{0.5cm}
+\textbf{Langkah build dan menjalankan:}
+\begin{lstlisting}[language=bash, numbers=none]
+mkdir build && cd build
+cmake ..
+cmake --build .
+./app
+\end{lstlisting}
+
+\textbf{Daftar tombol kontrol saat aplikasi berjalan:}
+\begin{itemize}
+    \item \texttt{W A S D} -- gerak kamera maju, mundur, kiri, kanan (mode DEFAULT).
+    \item \texttt{Gerakan Mouse} -- arahkan pandangan kamera.
+    \item \texttt{Scroll Mouse} -- zoom in / out (mengubah FOV).
+    \item \texttt{1} -- pindah ke mode DEFAULT (perspective + FPS).
+    \item \texttt{2} -- pindah ke mode ORTHO (orthographic).
+    \item \texttt{3} -- pindah ke mode TOPDOWN.
+    \item \texttt{4} -- pindah ke mode SHOWCASE.
+    \item \texttt{ESC} -- keluar dari aplikasi.
+\end{itemize}
+
+\end{document}
